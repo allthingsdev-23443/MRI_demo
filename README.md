@@ -144,7 +144,3 @@ For a click at normalized coordinates (0.5, 0.3) in the axial viewport:
 **Scor(Ax)**: `-25.50 * 0.3 + (-13.81) * 0.5 - (-30.49) = 15.935` → **Slice 16**
 
 This demonstrates the precise mathematical relationship between viewport coordinates and slice selection.
-
-
-
-
