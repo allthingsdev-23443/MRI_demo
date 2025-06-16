@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test MRI Viewer</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #1a1a1a;
+            color: white;
+            margin: 0;
+            padding: 20px;
+        }
+        .status {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            background-color: rgba(0, 0, 0, 0.8);
+            padding: 10px;
+            border-radius: 4px;
+            font-size: 12px;
+        }
+    </style>
+</head>
+<body>
+    <h1>Test MRI Viewer</h1>
+    <p>Testing initialization...</p>
+    
+    <div class="status" id="status">
+        <div>Status: <span id="status-text">Ready</span></div>
+    </div>
+
+    <script src="mriViewportManager.js"></script>
+    <script>
+        console.log('🚀 Starting test initialization...');
+        
+        async function testInit() {
+            try {
+                document.getElementById('status-text').textContent = 'Loading...';
+                console.log('✅ Status element found');
+                
+                // Test 1: Load JSON
+                console.log('📁 Testing JSON load...');
+                const response = await fetch('./realMRIImages.json');
+                const mriImageData = await response.json();
+                console.log('✅ JSON loaded:', Object.keys(mriImageData));
+                
+                // Test 2: Check MRIViewportManager
+                console.log('🔧 Testing MRIViewportManager...');
+                if (typeof MRIViewportManager === 'undefined') {
+                    throw new Error('MRIViewportManager not found');
+                }
+                console.log('✅ MRIViewportManager available');
+                
+                // Test 3: Create dummy viewports object
+                const dummyViewports = {
+                    axial: { container: document.body, image: document.body, sliceInfo: document.body },
+                    sagittal: { container: document.body, image: document.body, sliceInfo: document.body },
+                    coronal: { container: document.body, image: document.body, sliceInfo: document.body }
+                };
+                
+                const totalSlices = { axial: 21, sagittal: 21, coronal: 21 };
+                
+                console.log('🏗️ Creating MRIViewportManager...');
+                const manager = new MRIViewportManager(dummyViewports, totalSlices);
+                console.log('✅ MRIViewportManager created');
+                
+                // Test 4: Load correlation data
+                console.log('📊 Loading correlation data...');
+                await manager.loadCorrelationData('./correlationTables.json', './correlationLookupTables.json');
+                console.log('✅ Correlation data loaded');
+                
+                document.getElementById('status-text').textContent = 'Test passed!';
+                console.log('🎉 All tests passed!');
+                
+            } catch (error) {
+                console.error('❌ Test failed:', error);
+                document.getElementById('status-text').textContent = `Test failed: ${error.message}`;
+            }
+        }
+        
+        // Initialize when page loads
+        document.addEventListener('DOMContentLoaded', testInit);
+    </script>
+</body>
+</html> 

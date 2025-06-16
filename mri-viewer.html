@@ -1,0 +1,1196 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Correlated MRI Viewer</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #1a1a1a;
+            color: white;
+        }
+
+        .mri-container {
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr;
+            gap: 20px;
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        .viewport {
+            background-color: #2a2a2a;
+            border-radius: 8px;
+            padding: 15px;
+            text-align: center;
+        }
+
+        .viewport h3 {
+            margin-top: 0;
+            color: #4CAF50;
+        }
+
+        .image-container {
+            position: relative;
+            display: inline-block;
+            border: 2px solid #444;
+            border-radius: 4px;
+            overflow: hidden;
+            cursor: crosshair;
+        }
+
+        .mri-image {
+            display: block;
+            max-width: 100%;
+            height: 300px;
+            width: 300px;
+            object-fit: contain;
+            background-color: #000;
+            border: 1px solid #555;
+            user-select: none;
+        }
+
+        .crosshair {
+            position: absolute;
+            pointer-events: none;
+            z-index: 10;
+            width: 20px;
+            height: 20px;
+            transform: translate(-50%, -50%);
+        }
+
+        .crosshair::before,
+        .crosshair::after {
+            content: '';
+            position: absolute;
+            background-color: #00ff00;
+            opacity: 0.9;
+            box-shadow: 0 0 2px rgba(0, 0, 0, 0.8);
+        }
+
+        .crosshair::before {
+            width: 1px;
+            height: 300px;
+            left: 50%;
+            top: 50%;
+            transform: translate(-50%, -50%);
+        }
+
+        .crosshair::after {
+            width: 300px;
+            height: 1px;
+            left: 50%;
+            top: 50%;
+            transform: translate(-50%, -50%);
+        }
+
+        .slice-info {
+            margin-top: 10px;
+            font-size: 14px;
+            color: #ccc;
+        }
+
+        .current-slice {
+            font-weight: bold;
+            color: #4CAF50;
+        }
+
+        .slice-controls {
+            margin-top: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+        }
+
+        .slice-controls button {
+            background-color: #555;
+            color: white;
+            border: none;
+            width: 30px;
+            height: 30px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+        }
+
+        .slice-controls button:hover {
+            background-color: #666;
+        }
+
+        .slice-controls button:disabled {
+            background-color: #333;
+            cursor: not-allowed;
+            opacity: 0.5;
+        }
+
+        .slice-slider {
+            width: 120px;
+            margin: 0 10px;
+        }
+
+        .controls {
+            text-align: center;
+            margin-bottom: 20px;
+        }
+
+        .controls button {
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            margin: 0 5px;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+
+        .controls button:hover {
+            background-color: #45a049;
+        }
+
+        .status {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            background-color: rgba(0, 0, 0, 0.8);
+            padding: 10px;
+            border-radius: 4px;
+            font-size: 12px;
+            max-width: 300px;
+        }
+
+        .click-coordinates {
+            color: #ffeb3b;
+            font-family: monospace;
+        }
+
+        .scroll-hint {
+            font-size: 12px;
+            color: #888;
+            margin-top: 5px;
+        }
+    </style>
+</head>
+<body>
+    <h1>Correlated MRI Shoulder Viewer</h1>
+    <p>Click on any image to see correlated slices in other viewports. Use scroll wheel or controls to navigate through slices.</p>
+
+    <div class="controls">
+        <button onclick="resetViewer()">Reset to Center</button>
+        <button onclick="toggleCrosshairs()">Show Correlated Crosshairs</button>
+        <button onclick="testCrosshairs()">Test Crosshairs</button>
+        <button onclick="showCacheStats()">Cache Stats</button>
+        <button onclick="clearImageCache()">Clear Cache</button>
+        <button onclick="clearFailedUrls()" style="background-color: #f44336;">Clear Failed URLs</button>
+        <button onclick="restartPreloading()" style="background-color: #ff9800;">Restart Preloading</button>
+        <button onclick="forceLoadAllImages()" style="background-color: #e91e63;">Force Load All</button>
+        <button onclick="debugCacheState()" style="background-color: #9c27b0;">Debug Cache</button>
+        <button onclick="showDetailedStats()" style="background-color: #2196f3;">Detailed Stats</button>
+        <button onclick="testNetworkConnectivity()" style="background-color: #4caf50;">Test Network</button>
+    </div>
+
+    <div class="mri-container">
+        <div class="viewport">
+            <h3>Axial View</h3>
+            <div class="image-container" id="axial-container">
+                <img id="axial-image" class="mri-image" alt="Axial MRI slice">
+                <div class="crosshair" id="axial-crosshair" style="display: none;"></div>
+            </div>
+            <div class="slice-info">
+                Slice: <span class="current-slice" id="axial-slice">10</span> / 20
+            </div>
+            <div class="slice-controls">
+                <button onclick="changeSlice('axial', -1)" id="axial-prev">‹</button>
+                <input type="range" id="axial-slider" class="slice-slider" min="0" max="20" value="10">
+                <button onclick="changeSlice('axial', 1)" id="axial-next">›</button>
+            </div>
+            <div class="scroll-hint">Use mouse wheel to scroll</div>
+        </div>
+
+        <div class="viewport">
+            <h3>Sagittal View</h3>
+            <div class="image-container" id="sagittal-container">
+                <img id="sagittal-image" class="mri-image" alt="Sagittal MRI slice">
+                <div class="crosshair" id="sagittal-crosshair" style="display: none;"></div>
+            </div>
+            <div class="slice-info">
+                Slice: <span class="current-slice" id="sagittal-slice">10</span> / 20
+            </div>
+            <div class="slice-controls">
+                <button onclick="changeSlice('sagittal', -1)" id="sagittal-prev">‹</button>
+                <input type="range" id="sagittal-slider" class="slice-slider" min="0" max="20" value="10">
+                <button onclick="changeSlice('sagittal', 1)" id="sagittal-next">›</button>
+            </div>
+            <div class="scroll-hint">Use mouse wheel to scroll</div>
+        </div>
+
+        <div class="viewport">
+            <h3>Coronal View</h3>
+            <div class="image-container" id="coronal-container">
+                <img id="coronal-image" class="mri-image" alt="Coronal MRI slice">
+                <div class="crosshair" id="coronal-crosshair" style="display: none;"></div>
+            </div>
+            <div class="slice-info">
+                Slice: <span class="current-slice" id="coronal-slice">10</span> / 20
+            </div>
+            <div class="slice-controls">
+                <button onclick="changeSlice('coronal', -1)" id="coronal-prev">‹</button>
+                <input type="range" id="coronal-slider" class="slice-slider" min="0" max="20" value="10">
+                <button onclick="changeSlice('coronal', 1)" id="coronal-next">›</button>
+            </div>
+            <div class="scroll-hint">Use mouse wheel to scroll</div>
+        </div>
+    </div>
+
+    <div class="status" id="status">
+        <div>Status: <span id="status-text">Ready</span></div>
+        <div class="click-coordinates" id="coordinates"></div>
+        <div id="cache-status" style="font-size: 11px; color: #888; margin-top: 5px;"></div>
+    </div>
+
+    <script src="mriViewportManager.js"></script>
+    <script>
+        let viewportManager;
+        let showCrosshairs = false;
+
+        // Initialize the MRI viewer
+        async function initViewer() {
+            try {
+                console.log('🚀 Starting MRI viewer initialization...');
+                document.getElementById('status-text').textContent = 'Loading...';
+
+                // Load real MRI images from JSON
+                let mriImageData = null;
+                try {
+                    const response = await fetch('./realMRIImages.json');
+                    mriImageData = await response.json();
+                    
+                    // Set global reference for other functions
+                    window.realMRIImages = mriImageData.mri_images;
+                    
+                    console.log('Loaded real MRI images:', {
+                        axial: mriImageData.mri_images.axial.length,
+                        sagittal: mriImageData.mri_images.sagittal.length,
+                        coronal: mriImageData.mri_images.coronal.length
+                    });
+                } catch (error) {
+                    console.error('Failed to load MRI image data:', error);
+                    document.getElementById('status-text').textContent = 'Error: Could not load MRI image data';
+                    return;
+                }
+
+                // Total slices for each view
+                const totalSlices = { 
+                    axial: mriImageData.mri_images.axial.length, 
+                    sagittal: mriImageData.mri_images.sagittal.length, 
+                    coronal: mriImageData.mri_images.coronal.length 
+                };
+
+                // DOM elements for each viewport
+                const viewports = {
+                    axial: { container: document.getElementById('axial-container'), image: document.getElementById('axial-image'), sliceInfo: document.getElementById('axial-slice') },
+                    sagittal: { container: document.getElementById('sagittal-container'), image: document.getElementById('sagittal-image'), sliceInfo: document.getElementById('sagittal-slice') },
+                    coronal: { container: document.getElementById('coronal-container'), image: document.getElementById('coronal-image'), sliceInfo: document.getElementById('coronal-slice') }
+                };
+
+                // Debug: Check if all elements were found
+                console.log('Viewport elements check:', {
+                    axial: { 
+                        container: !!viewports.axial.container, 
+                        image: !!viewports.axial.image, 
+                        sliceInfo: !!viewports.axial.sliceInfo 
+                    },
+                    sagittal: { 
+                        container: !!viewports.sagittal.container, 
+                        image: !!viewports.sagittal.image, 
+                        sliceInfo: !!viewports.sagittal.sliceInfo 
+                    },
+                    coronal: { 
+                        container: !!viewports.coronal.container, 
+                        image: !!viewports.coronal.image, 
+                        sliceInfo: !!viewports.coronal.sliceInfo 
+                    }
+                });
+
+                // Instantiate the manager
+                console.log('🏗️ Creating MRIViewportManager...');
+                viewportManager = new MRIViewportManager(viewports, totalSlices);
+                console.log('✅ MRIViewportManager created successfully');
+
+                // Load the correlation data (formula-based coefficients)
+                console.log('📊 Loading correlation data...');
+                await viewportManager.loadCorrelationData('./correlationTables.json', './correlationTables.json');
+                console.log('✅ Correlation data loaded successfully');
+
+                // Function to update a single viewport
+                const updateViewport = (viewport, sliceNumber) => {
+                    const vp = viewports[viewport];
+                    if (vp && vp.image && vp.sliceInfo) {
+                        // Clamp the slice number to be within the valid range
+                        const maxSlice = totalSlices[viewport] - 1;
+                        const clampedSliceNumber = Math.max(0, Math.min(sliceNumber, maxSlice));
+                        
+                        // Get image URL from the loaded MRI data
+                        const imageUrl = mriImageData.mri_images[viewport][clampedSliceNumber];
+                        vp.image.src = imageUrl;
+                        vp.sliceInfo.textContent = clampedSliceNumber;
+                        
+                        console.log(`Updated ${viewport} to slice ${clampedSliceNumber}: ${imageUrl}`);
+                    }
+                };
+
+                // Global function to update viewport images (used by other functions)
+                window.updateViewportImage = async (viewport, sliceNumber) => {
+                    return new Promise((resolve, reject) => {
+                        const vp = viewports[viewport];
+                        if (!vp || !vp.image) {
+                            reject(new Error(`Viewport ${viewport} not found`));
+                            return;
+                        }
+
+                        const maxSlice = totalSlices[viewport] - 1;
+                        const clampedSliceNumber = Math.max(0, Math.min(sliceNumber, maxSlice));
+                        const imageUrl = mriImageData.mri_images[viewport][clampedSliceNumber];
+
+                        const img = new Image();
+                        img.onload = () => {
+                            vp.image.src = imageUrl;
+                            resolve();
+                        };
+                        img.onerror = () => {
+                            reject(new Error(`Failed to load image: ${imageUrl}`));
+                        };
+                        img.src = imageUrl;
+                    });
+                };
+
+                // Listen for slice updates from the manager
+                document.addEventListener('sliceupdate', (event) => {
+                    const { viewport, sliceNumber } = event.detail;
+                    console.log(`Slice update event received for ${viewport}:`, sliceNumber);
+                    // Update all viewports to reflect the current state
+                    const currentSlices = viewportManager.currentSlices;
+                    updateViewport('axial', currentSlices.axial);
+                    updateViewport('sagittal', currentSlices.sagittal);
+                    updateViewport('coronal', currentSlices.coronal);
+                    
+                    // Update slice controls (sliders/progress bars) for all viewports
+                    updateSliceControls('axial', currentSlices.axial);
+                    updateSliceControls('sagittal', currentSlices.sagittal);
+                    updateSliceControls('coronal', currentSlices.coronal);
+                });
+
+                // Initial setup for all viewports
+                Object.keys(viewports).forEach(viewport => {
+                    const initialSlice = viewportManager.getCurrentSlice(viewport);
+                    updateViewport(viewport, initialSlice);
+
+                    // Setup click listener (scroll listener is set up in setupScrollHandlers)
+                    viewports[viewport].image.addEventListener('click', (event) => {
+                        const rect = viewports[viewport].image.getBoundingClientRect();
+                        const x = event.clientX - rect.left;
+                        const y = event.clientY - rect.top;
+                        
+                        // Get actual image dimensions
+                        const imageWidth = viewports[viewport].image.naturalWidth || viewports[viewport].image.width;
+                        const imageHeight = viewports[viewport].image.naturalHeight || viewports[viewport].image.height;
+
+                        document.getElementById('coordinates').textContent = `Click: ${viewport} (${x.toFixed(0)}, ${y.toFixed(0)})`;
+                        updateCrosshair(viewport, x, y);
+                        viewportManager.handleViewportClick(viewport, x, y, rect.width, rect.height, imageWidth, imageHeight);
+                    });
+                });
+
+                // Set up click handlers for each viewport
+                setupViewportClickHandlers();
+                
+                // Cache monitoring disabled - using direct image loading
+                
+                // Initialize with center slices and load initial images
+                viewportManager.setCurrentSlice('axial', 10);
+                viewportManager.setCurrentSlice('sagittal', 10);
+                viewportManager.setCurrentSlice('coronal', 10);
+                
+                // Load initial images and update controls
+                updateViewport('axial', 10);
+                updateViewport('sagittal', 10);
+                updateViewport('coronal', 10);
+                
+                // Update slice controls for initial state
+                updateSliceControls('axial', 10);
+                updateSliceControls('sagittal', 10);
+                updateSliceControls('coronal', 10);
+                
+                // Set up scroll and slider handlers AFTER viewportManager is ready
+                console.log('🎯 Setting up scroll and slider handlers...');
+                setupScrollHandlers();
+                setupSliderHandlers();
+                
+                console.log('🎉 MRI viewer initialization completed successfully!');
+                document.getElementById('status-text').textContent = 'Ready - Click to correlate, scroll to navigate (21 slices per viewport 0-20, crosshairs show correlated positions)';
+                
+            } catch (error) {
+                console.error('❌ Failed to initialize viewer:', error);
+                console.error('Error details:', error.stack);
+                document.getElementById('status-text').textContent = `Error loading viewer: ${error.message}`;
+            }
+        }
+
+        // Crosshair functionality
+        function updateCrosshair(viewport, x, y) {
+            const crosshair = document.getElementById(`${viewport}-crosshair`);
+            if (crosshair) {
+                // Always update position
+                crosshair.style.left = x + 'px';
+                crosshair.style.top = y + 'px';
+                
+                // Always respect the global toggle state
+                crosshair.style.display = showCrosshairs ? 'block' : 'none';
+                
+                console.log(`Updated crosshair for ${viewport} at (${x}, ${y}), visible: ${showCrosshairs}`);
+            } else {
+                console.warn(`Crosshair element not found for ${viewport}`);
+            }
+        }
+
+        function setupViewportClickHandlers() {
+            const viewports = ['axial', 'sagittal', 'coronal'];
+            
+            viewports.forEach(viewport => {
+                const container = document.getElementById(`${viewport}-container`);
+                const image = document.getElementById(`${viewport}-image`);
+                
+                container.addEventListener('click', async (event) => {
+                    // Get the image's actual rendered position and size within the container
+                    const imageRect = image.getBoundingClientRect();
+                    const containerRect = container.getBoundingClientRect();
+                    
+                    // Calculate click position relative to the container
+                    const containerX = event.clientX - containerRect.left;
+                    const containerY = event.clientY - containerRect.top;
+                    
+                    // Calculate click position relative to the actual image
+                    const imageX = event.clientX - imageRect.left;
+                    const imageY = event.clientY - imageRect.top;
+                    
+                    // Check if click is actually on the image (not just the container)
+                    if (imageX < 0 || imageX > imageRect.width || imageY < 0 || imageY > imageRect.height) {
+                        console.log('Click outside image bounds, ignoring');
+                        return;
+                    }
+                    
+                    // Get actual image natural dimensions
+                    const imageWidth = image.naturalWidth || image.width;
+                    const imageHeight = image.naturalHeight || image.height;
+                    
+                    // Calculate coordinates as percentages of the actual image
+                    const xPercent = ((imageX / imageRect.width) * 100).toFixed(1);
+                    const yPercentFlipped = (((imageRect.height - imageY) / imageRect.height) * 100).toFixed(1);
+                    
+                    console.log(`=== CLICK ANALYSIS ===`);
+                    console.log(`Container: ${containerRect.width}x${containerRect.height}`);
+                    console.log(`Image rendered: ${imageRect.width}x${imageRect.height}`);
+                    console.log(`Image natural: ${imageWidth}x${imageHeight}`);
+                    console.log(`Click in container: (${containerX.toFixed(1)}, ${containerY.toFixed(1)})`);
+                    console.log(`Click in image: (${imageX.toFixed(1)}, ${imageY.toFixed(1)})`);
+                    console.log(`Image percentages: ${xPercent}%, ${yPercentFlipped}% (Y-flipped)`);
+                    
+                    document.getElementById('coordinates').textContent = 
+                        `Click: ${viewport} Image(${imageX.toFixed(0)}, ${imageY.toFixed(0)}) = ${xPercent}%, ${yPercentFlipped}% (Y-flipped)`;
+                    
+                    // Update crosshair using container coordinates for display
+                    updateCrosshair(viewport, containerX, containerY);
+                    
+                    // Calculate correlated positions and update crosshairs on other viewports
+                    await updateCorrelatedCrosshairs(viewport, xPercent, yPercentFlipped);
+                    
+                    // Handle the viewport correlation for slice changes using IMAGE coordinates
+                    try {
+                        console.log(`Passing to handleViewportClick: imageX=${imageX}, imageY=${imageY}, imageRect=${imageRect.width}x${imageRect.height}, natural=${imageWidth}x${imageHeight}`);
+                        
+                        // Pass image-relative coordinates and dimensions
+                        viewportManager.handleViewportClick(
+                            viewport, 
+                            imageX,           // X relative to image
+                            imageY,           // Y relative to image  
+                            imageRect.width,  // Rendered image width
+                            imageRect.height, // Rendered image height
+                            imageWidth,       // Natural image width
+                            imageHeight       // Natural image height
+                        ).catch(error => {
+                            console.error('Error handling viewport click:', error);
+                            document.getElementById('status-text').textContent = 'Error updating correlated views';
+                        });
+                    } catch (error) {
+                        console.error('Error handling viewport click:', error);
+                        document.getElementById('status-text').textContent = 'Error updating correlated views';
+                    }
+                });
+            });
+        }
+
+        // New function to update crosshairs on correlated viewports
+        async function updateCorrelatedCrosshairs(sourceViewport, xPercent, yPercent) {
+            if (!viewportManager) return;
+            
+            console.log(`Updating correlated crosshairs from ${sourceViewport}`);
+            
+            const viewports = ['axial', 'sagittal', 'coronal'];
+            const otherViewports = viewports.filter(v => v !== sourceViewport);
+            
+            for (const targetViewport of otherViewports) {
+                const targetImage = document.getElementById(`${targetViewport}-image`);
+                if (!targetImage) continue;
+                
+                const rect = targetImage.getBoundingClientRect();
+                let targetX, targetY;
+                
+                // Calculate correlated positions based on source viewport
+                // Note: Y-axis is already flipped in the input yPercent (0 = bottom, 100 = top)
+                // For crosshair display, we need to convert back to screen coordinates (0 = top)
+                switch (sourceViewport) {
+                    case 'axial':
+                        if (targetViewport === 'sagittal') {
+                            // Axial X maps to Sagittal slice, maintain spatial relationship for crosshair
+                            targetX = (xPercent / 100) * rect.width;
+                            targetY = rect.height - (yPercent / 100) * rect.height; // Convert flipped Y back to screen Y
+                        } else if (targetViewport === 'coronal') {
+                            // Axial Y maps to Coronal slice, maintain spatial relationship for crosshair
+                            targetX = (xPercent / 100) * rect.width;
+                            targetY = rect.height - (yPercent / 100) * rect.height; // Convert flipped Y back to screen Y
+                        }
+                        break;
+                        
+                    case 'sagittal':
+                        if (targetViewport === 'axial') {
+                            // Sagittal X maps to Axial slice, maintain spatial relationship for crosshair
+                            targetX = (xPercent / 100) * rect.width;
+                            targetY = rect.height - (yPercent / 100) * rect.height; // Convert flipped Y back to screen Y
+                        } else if (targetViewport === 'coronal') {
+                            // Sagittal Y maps to Coronal slice, maintain spatial relationship for crosshair
+                            targetX = (xPercent / 100) * rect.width;
+                            targetY = rect.height - (yPercent / 100) * rect.height; // Convert flipped Y back to screen Y
+                        }
+                        break;
+                        
+                    case 'coronal':
+                        if (targetViewport === 'axial') {
+                            // Coronal X maps to Axial slice (corrected mapping)
+                            targetX = (xPercent / 100) * rect.width;
+                            targetY = rect.height - (yPercent / 100) * rect.height; // Convert flipped Y back to screen Y
+                        } else if (targetViewport === 'sagittal') {
+                            // Coronal Y maps to Sagittal slice (corrected mapping)
+                            targetX = (xPercent / 100) * rect.width;
+                            targetY = rect.height - (yPercent / 100) * rect.height; // Convert flipped Y back to screen Y
+                        }
+                        break;
+                }
+                
+                // Update crosshair position on target viewport
+                if (targetX !== undefined && targetY !== undefined) {
+                    updateCrosshair(targetViewport, targetX, targetY);
+                    console.log(`Updated ${targetViewport} crosshair at (${targetX.toFixed(1)}, ${targetY.toFixed(1)})`);
+                }
+            }
+            
+            // Ensure all crosshairs are visible if enabled
+            updateAllCrosshairVisibility();
+        }
+
+        function setupScrollHandlers() {
+            console.log('🚀 Setting up scroll handlers...');
+            const viewports = ['axial', 'sagittal', 'coronal'];
+            
+            // Prevent page scrolling when scrolling over MRI viewports
+            document.addEventListener('wheel', (e) => {
+                // Check if the scroll is happening over a viewport
+                const target = e.target.closest('.viewport, .image-container, .mri-image');
+                if (target) {
+                    console.log('🛡️ Preventing page scroll over viewport');
+                    e.preventDefault();
+                }
+            }, { passive: false });
+            
+            viewports.forEach(viewport => {
+                const container = document.getElementById(`${viewport}-container`);
+                const image = document.getElementById(`${viewport}-image`);
+                console.log(`Setting up scroll for ${viewport}:`, !!container, !!image);
+                
+                // Add wheel listener to both container and image for better coverage
+                const elements = [container, image].filter(el => el);
+                
+                elements.forEach((element, index) => {
+                    const elementType = index === 0 ? 'container' : 'image';
+                    console.log(`Adding wheel listener to ${viewport} ${elementType}`);
+                    
+                    element.addEventListener('wheel', async (event) => {
+                        // Aggressively prevent default behavior and stop propagation
+                        event.preventDefault();
+                        event.stopPropagation();
+                        event.stopImmediatePropagation();
+                        
+                        console.log(`🎯 WHEEL EVENT on ${viewport} ${elementType}! Delta: ${event.deltaY}`);
+                        
+                        if (!viewportManager) {
+                            console.error('❌ ViewportManager not initialized yet');
+                            return false;
+                        }
+                        
+                        try {
+                            const currentSlice = viewportManager.getCurrentSlice(viewport);
+                            console.log(`📍 Current slice for ${viewport}: ${currentSlice}`);
+                            
+                            const delta = event.deltaY > 0 ? 1 : -1;
+                            const newSlice = Math.max(0, Math.min(20, currentSlice + delta));
+                            console.log(`🔄 Calculated new slice: ${newSlice} (delta: ${delta})`);
+                            
+                            if (newSlice !== currentSlice) {
+                                console.log(`✅ Scroll: ${viewport} ${currentSlice} → ${newSlice}`);
+                                await setSlice(viewport, newSlice);
+                            } else {
+                                console.log(`⏸️ No change needed: already at slice ${currentSlice}`);
+                            }
+                        } catch (error) {
+                            console.error('❌ Error during scroll slice change:', error);
+                        }
+                        
+                        return false;
+                    }, { passive: false });
+                });
+                
+                if (!container) {
+                    console.error(`Container not found for ${viewport}`);
+                }
+            });
+        }
+
+        function setupSliderHandlers() {
+            console.log('Setting up slider handlers...');
+            const viewports = ['axial', 'sagittal', 'coronal'];
+            
+            viewports.forEach(viewport => {
+                const slider = document.getElementById(`${viewport}-slider`);
+                console.log(`Setting up slider for ${viewport}:`, !!slider);
+                
+                if (slider) {
+                    slider.addEventListener('input', async (event) => {
+                        const newSlice = parseInt(event.target.value);
+                        console.log(`Slider change: ${viewport} → ${newSlice}`);
+                        
+                        if (!viewportManager) {
+                            console.error('ViewportManager not initialized yet');
+                            return;
+                        }
+                        
+                        try {
+                            await setSlice(viewport, newSlice);
+                        } catch (error) {
+                            console.error('Error during slider change:', error);
+                        }
+                    });
+                } else {
+                    console.error(`Slider not found for ${viewport}`);
+                }
+            });
+        }
+
+        function updateAllCrosshairVisibility() {
+            const crosshairs = document.querySelectorAll('.crosshair');
+            crosshairs.forEach(crosshair => {
+                crosshair.style.display = showCrosshairs ? 'block' : 'none';
+            });
+            console.log(`Updated all ${crosshairs.length} crosshairs visibility to: ${showCrosshairs}`);
+        }
+
+        // Slice navigation functions
+        function changeSlice(viewport, delta) {
+            console.log(`🔘 Button click: ${viewport} delta ${delta}`);
+            if (viewportManager) {
+                const currentSlice = viewportManager.getCurrentSlice(viewport);
+                const newSlice = Math.max(0, Math.min(20, currentSlice + delta));
+                console.log(`🔘 Button: ${viewport} ${currentSlice} → ${newSlice}`);
+                if (newSlice !== currentSlice) {
+                    setSlice(viewport, newSlice);
+                } else {
+                    console.log(`🔘 Button: No change needed for ${viewport}`);
+                }
+            } else {
+                console.error('🔘 Button: ViewportManager not available');
+            }
+        }
+
+        // Global updateViewport function to fix scroll handler errors
+        async function updateViewport(viewport, sliceNumber) {
+            console.log(`Updating ${viewport} to slice ${sliceNumber}`);
+            await updateViewportDisplay(viewport, sliceNumber);
+        }
+
+        async function setSlice(viewport, sliceNumber) {
+            if (viewportManager) {
+                console.log(`Setting ${viewport} to slice ${sliceNumber}`);
+                viewportManager.setCurrentSlice(viewport, sliceNumber);
+                await updateViewport(viewport, sliceNumber);
+                updateSliceControls(viewport, sliceNumber);
+            }
+        }
+
+        function updateSliceControls(viewport, sliceNumber) {
+            console.log(`Updating slice controls for ${viewport} to slice ${sliceNumber}`);
+            
+            // Update slider (progress bar)
+            const slider = document.getElementById(`${viewport}-slider`);
+            if (slider) {
+                slider.value = sliceNumber;
+                console.log(`Updated ${viewport} slider to ${sliceNumber}`);
+            } else {
+                console.error(`Slider not found for ${viewport}`);
+            }
+            
+            // Update navigation buttons
+            const prevBtn = document.getElementById(`${viewport}-prev`);
+            const nextBtn = document.getElementById(`${viewport}-next`);
+            
+            if (prevBtn) {
+                prevBtn.disabled = (sliceNumber === 0);
+            }
+            if (nextBtn) {
+                nextBtn.disabled = (sliceNumber === 20);
+            }
+        }
+
+        // Update viewport display with real MRI images - optimized for performance
+        async function updateViewportDisplay(viewport, sliceNumber) {
+            console.log(`Updating ${viewport} display to slice ${sliceNumber}`);
+            const startTime = performance.now();
+            
+            // Update slice number display immediately (show 0-based indexing as expected by user)
+            document.getElementById(`${viewport}-slice`).textContent = sliceNumber;
+            
+            // Update slice controls immediately for responsive UI
+            updateSliceControls(viewport, sliceNumber);
+            
+            // Load the image asynchronously but don't block UI updates
+            try {
+                if (window.updateViewportImage) {
+                    const imagePromise = window.updateViewportImage(viewport, sliceNumber);
+                    
+                    // Set a timeout to catch slow loading images
+                    const timeoutPromise = new Promise((resolve, reject) => {
+                        setTimeout(() => reject(new Error('Image load timeout')), 5000);
+                    });
+                    
+                    // Race between image loading and timeout
+                    await Promise.race([imagePromise, timeoutPromise]);
+                    
+                    const endTime = performance.now();
+                    console.log(`${viewport} slice ${sliceNumber} loaded in ${(endTime - startTime).toFixed(2)}ms`);
+                }
+            } catch (error) {
+                console.error(`Failed to load ${viewport} slice ${sliceNumber}:`, error);
+                
+                // Set error state on image element
+                const imageElement = document.getElementById(`${viewport}-image`);
+                if (imageElement) {
+                    imageElement.alt = `${viewport} slice ${sliceNumber} - Load error`;
+                    imageElement.style.border = '2px solid red';
+                    
+                    // Reset border after 2 seconds
+                    setTimeout(() => {
+                        imageElement.style.border = '1px solid #555';
+                    }, 2000);
+                }
+                
+                // Show user-friendly error message
+                document.getElementById('status-text').textContent = 
+                    `Failed to load ${viewport} slice ${sliceNumber} - trying cache refresh...`;
+                
+                // Try to recover by clearing cache for this specific image and retrying
+                setTimeout(async () => {
+                    try {
+                        if (window.imageCache && window.realMRIImages) {
+                            const imageUrl = window.realMRIImages[viewport]?.[sliceNumber];
+                            if (imageUrl) {
+                                const cacheKey = `${viewport}-${sliceNumber}`;
+                                window.imageCache.cache.delete(cacheKey);
+                                console.log(`Cleared cache for ${cacheKey}, retrying...`);
+                                await window.updateViewportImage(viewport, sliceNumber);
+                                document.getElementById('status-text').textContent = 'Image recovered successfully';
+                            }
+                        }
+                    } catch (retryError) {
+                        console.error('Recovery attempt failed:', retryError);
+                        document.getElementById('status-text').textContent = 'Image load failed - manual refresh needed';
+                    }
+                }, 1000);
+            }
+        }
+
+        async function resetViewer() {
+            if (viewportManager) {
+                await Promise.all([
+                    viewportManager.setSlice('axial', 10),
+                    viewportManager.setSlice('sagittal', 10),
+                    viewportManager.setSlice('coronal', 10)
+                ]);
+                document.getElementById('coordinates').textContent = '';
+                document.getElementById('status-text').textContent = 'Viewer reset to center slices';
+            }
+        }
+
+        function toggleCrosshairs() {
+            showCrosshairs = !showCrosshairs;
+            console.log('=== CROSSHAIR TOGGLE ===');
+            console.log('New state:', showCrosshairs);
+            
+            // Use the centralized visibility update function
+            updateAllCrosshairVisibility();
+            
+            // Update button text to show current state
+            const button = document.querySelector('button[onclick="toggleCrosshairs()"]');
+            if (button) {
+                button.textContent = showCrosshairs ? 'Hide Correlated Crosshairs' : 'Show Correlated Crosshairs';
+                console.log('Button text updated to:', button.textContent);
+            }
+            
+            // Update status with clear feedback
+            const statusText = showCrosshairs ? 
+                'Crosshairs ON - Click on images to see position markers' : 
+                'Crosshairs OFF - Position markers hidden';
+            document.getElementById('status-text').textContent = statusText;
+            
+            console.log('Toggle complete. State:', showCrosshairs);
+        }
+
+        function setupCacheMonitoring() {
+            // Update cache status every 2 seconds
+            setInterval(() => {
+                if (window.imageCache) {
+                    const stats = window.imageCache.getStats();
+                    const cacheStatusElement = document.getElementById('cache-status');
+                    if (cacheStatusElement) {
+                        const hitRate = stats.hits + stats.misses > 0 ? stats.hitRate.toFixed(1) : '0.0';
+                        cacheStatusElement.textContent = 
+                            `Cache: ${stats.cacheSize}/63 images | Hit rate: ${hitRate}% | Loading: ${stats.loadingCount}`;
+                    }
+                }
+            }, 2000);
+        }
+
+        function logPerformanceMetrics() {
+            if (window.imageCache) {
+                const stats = window.imageCache.getStats();
+                console.log('=== PERFORMANCE METRICS ===');
+                console.log(`Cache Size: ${stats.cacheSize}/63 images`);
+                console.log(`Hit Rate: ${stats.hitRate.toFixed(1)}%`);
+                console.log(`Cache Hits: ${stats.hits}`);
+                console.log(`Cache Misses: ${stats.misses}`);
+                console.log(`Currently Loading: ${stats.loadingCount}`);
+                console.log(`Preloaded: ${stats.preloaded}`);
+                console.log(`Failed: ${stats.failed}`);
+                console.log('=== END METRICS ===');
+            }
+        }
+
+        function showCacheStats() {
+            if (window.imageCache) {
+                const stats = window.imageCache.getStats();
+                alert(`Image Cache Statistics:
+                
+Cached Images: ${stats.cacheSize}/63
+Hit Rate: ${stats.hitRate.toFixed(1)}%
+Cache Hits: ${stats.hits}
+Cache Misses: ${stats.misses}
+Preloaded: ${stats.preloaded}
+Failed: ${stats.failed}
+Currently Loading: ${stats.loadingCount}
+
+Higher hit rate = faster loading!`);
+            }
+        }
+
+        function clearImageCache() {
+            if (window.imageCache && confirm('Clear image cache? This will free memory but images will need to reload.')) {
+                window.imageCache.clearCache();
+                document.getElementById('cache-status').textContent = 'Cache cleared';
+                
+                // Restart preloading after clearing
+                setTimeout(async () => {
+                    if (window.realMRIImages) {
+                        console.log('Restarting preloading after cache clear...');
+                        await window.imageCache.preloadImages(window.realMRIImages);
+                    }
+                }, 1000);
+            }
+        }
+
+        async function restartPreloading() {
+            if (window.imageCache && window.realMRIImages) {
+                console.log('Manual preloading restart requested...');
+                document.getElementById('status-text').textContent = 'Restarting image preloading...';
+                
+                try {
+                    await window.imageCache.restartPreloading(window.realMRIImages);
+                    document.getElementById('status-text').textContent = 'Preloading restarted successfully';
+                } catch (error) {
+                    console.error('Failed to restart preloading:', error);
+                    document.getElementById('status-text').textContent = 'Failed to restart preloading';
+                }
+            } else {
+                alert('Cannot restart preloading - cache or images not available');
+            }
+        }
+
+        async function forceLoadAllImages() {
+            if (!window.imageCache || !window.realMRIImages) {
+                alert('Image cache or MRI images not available');
+                return;
+            }
+            
+            console.log('🔄 Force loading all images...');
+            document.getElementById('status-text').textContent = 'Force loading all images...';
+            
+            // Clear failed URLs to allow retry
+            const failedCount = window.imageCache.clearFailedUrls();
+            console.log(`Cleared ${failedCount} failed URLs`);
+            
+            // Force load all images
+            const totalImages = 21 * 3; // 21 slices × 3 viewports
+            let loaded = 0;
+            let failed = 0;
+            
+            for (const viewport of ['axial', 'sagittal', 'coronal']) {
+                for (let slice = 0; slice < 21; slice++) {
+                    try {
+                        const imageUrl = window.realMRIImages[viewport][slice];
+                        await window.imageCache.getImage(viewport, slice, imageUrl);
+                        loaded++;
+                        
+                        // Update progress
+                        if (loaded % 5 === 0) {
+                            document.getElementById('status-text').textContent = 
+                                `Loading images: ${loaded}/${totalImages} (${failed} failed)`;
+                        }
+                    } catch (error) {
+                        failed++;
+                        console.error(`Failed to load ${viewport}-${slice}:`, error.message);
+                    }
+                }
+            }
+            
+            document.getElementById('status-text').textContent = 
+                `Force load complete: ${loaded}/${totalImages} loaded, ${failed} failed`;
+            
+            console.log(`Force load complete: ${loaded} loaded, ${failed} failed`);
+            showCacheStats();
+        }
+
+        function clearFailedUrls() {
+            if (window.imageCache && window.imageCache.clearFailedUrls) {
+                const clearedCount = window.imageCache.clearFailedUrls();
+                alert(`Cleared ${clearedCount} failed URLs. These images can now be retried.`);
+                document.getElementById('status-text').textContent = `Cleared ${clearedCount} failed URLs - ready to retry`;
+            } else {
+                alert('Failed URL clearing not available');
+            }
+        }
+
+        function showDetailedStats() {
+            if (window.imageCache && window.imageCache.getDetailedStats) {
+                const stats = window.imageCache.getDetailedStats();
+                const detailedInfo = `Detailed Cache Statistics:
+
+📊 CACHE STATUS:
+• Cached Images: ${stats.cacheSize}/63
+• Hit Rate: ${stats.hitRate.toFixed(1)}%
+• Cache Hits: ${stats.hits}
+• Cache Misses: ${stats.misses}
+
+🔄 LOADING STATUS:
+• Currently Loading: ${stats.loadingCount}
+• Loading Promises: ${stats.loadingPromises}
+• Is Preloading: ${stats.isPreloading}
+
+❌ FAILURE STATUS:
+• Failed URLs: ${stats.failedUrls}
+• Retry Delays: ${stats.retryDelays}
+• Total Failed: ${stats.failed}
+• Preloaded: ${stats.preloaded}
+
+💡 TIPS:
+${stats.failedUrls > 0 ? '• Use "Clear Failed URLs" to retry failed images' : '• All URLs are working properly'}
+${stats.hitRate < 50 ? '• Low hit rate - consider restarting preloading' : '• Good cache performance'}`;
+                
+                alert(detailedInfo);
+            }
+        }
+
+        function debugCacheState() {
+            if (window.imageCache) {
+                const stats = window.imageCache.getDetailedStats ? window.imageCache.getDetailedStats() : window.imageCache.getStats();
+                console.log('=== DETAILED CACHE DEBUG ===');
+                console.log('Cache Size:', stats.cacheSize);
+                console.log('Loading Count:', stats.loadingCount);
+                console.log('Is Preloading:', window.imageCache.isPreloading);
+                console.log('Loading Promises:', stats.loadingPromises || window.imageCache.loadingPromises.size);
+                console.log('Failed URLs:', stats.failedUrls || 'N/A');
+                console.log('Cache Stats:', stats);
+                
+                // Check for stuck loading promises
+                if (stats.loadingCount === 0 && (stats.loadingPromises > 0 || window.imageCache.loadingPromises.size > 0)) {
+                    console.warn('⚠️ Detected stuck loading promises!');
+                    console.log('Stuck promises:', Array.from(window.imageCache.loadingPromises.keys()));
+                }
+                
+                console.log('=== END DEBUG ===');
+                
+                // Show in UI
+                const debugInfo = `Debug Info:
+Cache: ${stats.cacheSize}/63 images
+Loading: ${stats.loadingCount}
+Preloading: ${window.imageCache.isPreloading}
+Failed URLs: ${stats.failedUrls || 'N/A'}
+Hit Rate: ${stats.hitRate.toFixed(1)}%`;
+                
+                alert(debugInfo);
+            }
+        }
+
+        // Test network connectivity to the MRI image server
+        async function testNetworkConnectivity() {
+            document.getElementById('status-text').textContent = 'Testing network connectivity...';
+            
+            if (!window.realMRIImages) {
+                alert('Real MRI images not loaded yet. Please wait for initialization.');
+                return;
+            }
+            
+            const testUrls = [
+                window.realMRIImages.axial[10],    // Center axial slice
+                window.realMRIImages.sagittal[10], // Center sagittal slice
+                window.realMRIImages.coronal[10]   // Center coronal slice
+            ];
+            
+            let successCount = 0;
+            let failureCount = 0;
+            const results = [];
+            
+            console.log('🌐 Testing network connectivity to MRI server...');
+            
+            for (let i = 0; i < testUrls.length; i++) {
+                const url = testUrls[i];
+                const viewport = ['axial', 'sagittal', 'coronal'][i];
+                
+                try {
+                    const startTime = performance.now();
+                    const response = await fetch(url, {
+                        method: 'HEAD', // Only get headers, not the full image
+                        mode: 'cors',
+                        cache: 'no-cache'
+                    });
+                    const endTime = performance.now();
+                    const responseTime = endTime - startTime;
+                    
+                    if (response.ok) {
+                        successCount++;
+                        results.push(`✅ ${viewport}: ${responseTime.toFixed(0)}ms (${response.status})`);
+                        console.log(`✅ ${viewport} connectivity OK: ${responseTime.toFixed(0)}ms`);
+                    } else {
+                        failureCount++;
+                        results.push(`❌ ${viewport}: HTTP ${response.status} ${response.statusText}`);
+                        console.error(`❌ ${viewport} failed: HTTP ${response.status}`);
+                    }
+                } catch (error) {
+                    failureCount++;
+                    results.push(`❌ ${viewport}: ${error.message}`);
+                    console.error(`❌ ${viewport} error:`, error.message);
+                }
+            }
+            
+            const networkStatus = successCount === 3 ? 'EXCELLENT' : 
+                                 successCount === 2 ? 'GOOD' : 
+                                 successCount === 1 ? 'POOR' : 'FAILED';
+            
+            const testResult = `Network Connectivity Test Results:
+
+🌐 SERVER: mrt-anatomy.s3.eu-central-1.amazonaws.com
+📊 STATUS: ${networkStatus} (${successCount}/3 successful)
+
+${results.join('\n')}
+
+${successCount === 3 ? 
+  '✅ Network is working well! Image loading issues may be due to high server load.' :
+  successCount > 0 ?
+  '⚠️ Partial connectivity. Some images may fail to load.' :
+  '❌ No connectivity. Check your internet connection or try again later.'
+}`;
+            
+            alert(testResult);
+            
+            const statusMessage = successCount === 3 ? 
+                'Network test passed - connectivity is good' :
+                `Network test: ${successCount}/3 connections successful`;
+            document.getElementById('status-text').textContent = statusMessage;
+        }
+
+        // Test function to verify crosshairs are working
+        function testCrosshairs() {
+            console.log('=== TESTING CROSSHAIRS ===');
+            
+            // Enable crosshairs first
+            showCrosshairs = true;
+            console.log('Crosshairs enabled for testing');
+            
+            const viewports = ['axial', 'sagittal', 'coronal'];
+            let successCount = 0;
+            
+            viewports.forEach((viewport, index) => {
+                const crosshair = document.getElementById(`${viewport}-crosshair`);
+                const container = document.getElementById(`${viewport}-container`);
+                const image = document.getElementById(`${viewport}-image`);
+                
+                if (crosshair && container && image) {
+                    console.log(`✓ ${viewport} elements found successfully`);
+                    
+                    // Test positioning at different locations for each viewport
+                    const rect = image.getBoundingClientRect();
+                    const testX = (rect.width / 3) * (index + 1); // Different X for each viewport
+                    const testY = (rect.height / 3) * (index + 1); // Different Y for each viewport
+                    
+                    // Use the updateCrosshair function to ensure consistency
+                    updateCrosshair(viewport, testX, testY);
+                    
+                    console.log(`${viewport} crosshair positioned at: (${testX.toFixed(1)}, ${testY.toFixed(1)})`);
+                    successCount++;
+                } else {
+                    console.error(`✗ Missing elements for ${viewport}:`, { 
+                        crosshair: !!crosshair, 
+                        container: !!container, 
+                        image: !!image 
+                    });
+                }
+            });
+            
+            // Update all crosshair visibility using centralized function
+            updateAllCrosshairVisibility();
+            
+            // Update button text and status
+            const button = document.querySelector('button[onclick="toggleCrosshairs()"]');
+            if (button) {
+                button.textContent = 'Hide Correlated Crosshairs';
+                console.log('Button text updated to: Hide Correlated Crosshairs');
+            }
+            
+            const statusMessage = `Crosshairs test complete - ${successCount}/3 viewports positioned successfully`;
+            document.getElementById('status-text').textContent = statusMessage;
+            console.log('=== CROSSHAIRS TEST COMPLETE ===');
+            console.log(`Result: ${successCount}/3 successful, State: ${showCrosshairs}`);
+        }
+
+        // Initialize when page loads
+        document.addEventListener('DOMContentLoaded', initViewer);
+    </script>
+</body>
+</html> 

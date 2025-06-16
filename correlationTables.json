@@ -1,0 +1,46 @@
+{
+  "shoulder_correlations": {
+    "coefficients": {
+      "sagittal_to_axial": {
+        "a": -11.68,
+        "b": 19.22,
+        "c": -4.08
+      },
+      "sagittal_to_coronal": {
+        "a": -1.26,
+        "b": 25.88,
+        "c": 3.01
+      },
+      "axial_to_sagittal": {
+        "a": -30.71,
+        "b": -0.67,
+        "c": -26.41
+      },
+      "axial_to_coronal": {
+        "a": -34.74,
+        "b": 0.00,
+        "c": -29.48
+      },
+      "coronal_to_sagittal": {
+        "a": 0.00,
+        "b": 24.29,
+        "c": 1.71
+      },
+      "coronal_to_axial": {
+        "a": -25.50,
+        "b": -13.81,
+        "c": -30.49
+      }
+    },
+    "metadata": {
+      "formula": "slice = a * x + b * y + c",
+      "coordinate_system": {
+        "x_range": "0 to 1 (left to right)",
+        "y_range": "0 to 1 (bottom to top, flipped)",
+        "slice_range": "0 to 20 (0-based indexing)"
+      },
+      "anatomical_region": "shoulder",
+      "source": "Parameters provided by user"
+    }
+  }
+} 
